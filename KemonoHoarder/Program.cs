@@ -57,7 +57,8 @@ namespace KemonoHoarder
             const string data = "https://kemono.party/data";
             var downloads = new List<FileToDownload>();
             var linkParser = new Regex(@"http(s)?://([\w-]+\.)+[\w-]+(/[\w- ./?%&=]*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-            var embededs = new List<string>();
+            var contenturls = new List<string>();
+            var embededs = new List<Embed>();
             foreach (var post in posts)
             {
                 var folder =
@@ -70,21 +71,35 @@ namespace KemonoHoarder
                     urls.AppendLine($"{attachment.Name},{data}{attachment.Path}");
                 }
 
-                var embeded = linkParser.Matches(post.Content);
-                embededs.AddRange(embeded.Select(e => e.Value));
+                if (post.File != default)
+                {
+                    downloads.Add(new FileToDownload{path = Path.Combine(path, folder), name = post.File.Name, url = data + post.File.Path});
+                    urls.AppendLine($"{post.File.Name},{data}{post.File.Path}");
+                }
+
+                var contenturl = linkParser.Matches(post.Content);
+                contenturls.AddRange(contenturl.Select(e => e.Value));
                 await System.IO.File.WriteAllTextAsync(Path.Combine(path, folder, "urls.txt"), urls.ToString());
                 await System.IO.File.WriteAllTextAsync(Path.Combine(path, folder, "content.txt"), post.Content);
-                await System.IO.File.WriteAllLinesAsync(Path.Combine(path, folder, "contenturls.txt"),
-                    embeded.Select(e => e.Value));
-                await System.IO.File.WriteAllTextAsync(Path.Combine(path, folder, "embeded.txt"),
-                    $"[{post.Embed.Subject}][{post.Embed.Description}],{post.Embed.Url}");
-                Console.WriteLine($"作品: {post.Title} 附件: {post.Attachments.Count} 件 内含链接: {embeded.Count} 个");
+                if (contenturl.Any())
+                {
+                    await System.IO.File.WriteAllLinesAsync(Path.Combine(path, folder, "contenturls.txt"),
+                        contenturl.Select(e => e.Value));
+                }
+                if (post.Embed.Url != null)
+                {
+                    embededs.Add(post.Embed);
+                    await System.IO.File.WriteAllTextAsync(Path.Combine(path, folder, "embeded.txt"),
+                        $"[{post.Embed.Subject}][{post.Embed.Description}],{post.Embed.Url}");
+                }
+                Console.WriteLine($"作品: {post.Title} 附件: {post.Attachments.Count} 件 内含链接: {contenturl.Count} 个");
             }
             Console.WriteLine("附件链接已写入 urls.txt, 内容已写入: content.txt, 内容内的链接已写入 contenturls.txt, 嵌入内容已写入: embeded.txt.");
-            embededs = embededs.Distinct().ToList();
-            await System.IO.File.WriteAllLinesAsync(Path.Combine(path, "all_embededurls.txt"), embededs);
-            Console.WriteLine("所有嵌入在内容里的链接已写入: all_embededurls.txt");
-            Console.WriteLine("所有找到的链接");
+            contenturls = contenturls.Distinct().ToList();
+            await System.IO.File.WriteAllLinesAsync(Path.Combine(path, "all_contenturls.txt"), contenturls);
+            Console.WriteLine("所有内容里的链接已写入: all_contenturls.txt");
+            await System.IO.File.WriteAllTextAsync(Path.Combine(path, "all_embededs.txt"), embededs.ToJsonString());
+            Console.WriteLine("所有嵌入内容已写入: all_embededs.txt");
             Console.WriteLine($"已找到附件: {downloads.Count} 个");
             Console.WriteLine($"正在下载附件···");
             DownloadPics(downloads).Wait();
@@ -123,8 +138,17 @@ namespace KemonoHoarder
                     var current = count;
                     Interlocked.Increment(ref count);
                     Console.WriteLine($"第{current}/{downloads.Count}个文件的下载开始.");
-                    await hc.DownloadAsync(f.url, Path.Combine(f.path, f.name));
+                    var failed = true;
+                    while (failed)
+                    {
+                        await hc.DownloadAsync(f.url, Path.Combine(f.path, f.name));
+                        failed = false;
+                    }
                     Console.WriteLine($"第{current}/{downloads .Count}个文件的下载结束.");
+                }
+                catch (Exception)
+                {
+                    // ignored
                 }
                 finally
                 {
@@ -150,6 +174,7 @@ namespace KemonoHoarder
                 result = result.Replace(c.ToString(), ""); 
             }
 
+            result = result.Replace(".", "");
             return result;
         }
     }
